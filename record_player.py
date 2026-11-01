@@ -76,19 +76,25 @@ class SpotifyController:
         redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
 
         if not all([client_id, client_secret, refresh_token, redirect_uri]):
-            print("Error: Spotify secrets are not set.")
-            sys.exit(1)
+            print("Note: Spotify credentials not configured in .env. Local media playback is active.")
+            self.sp = None
+            return
 
-        auth = SpotifyOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-            scope="user-read-playback-state,user-modify-playback-state",
-            open_browser=False,
-            cache_handler=MemoryCacheHandler(),
-        )
-        auth.refresh_access_token(refresh_token)
-        self.sp = spotipy.Spotify(auth_manager=auth)
+        try:
+            auth = SpotifyOAuth(
+                client_id=client_id,
+                client_secret=client_secret,
+                redirect_uri=redirect_uri,
+                scope="user-read-playback-state,user-modify-playback-state",
+                open_browser=False,
+                cache_handler=MemoryCacheHandler(),
+            )
+            auth.refresh_access_token(refresh_token)
+            self.sp = spotipy.Spotify(auth_manager=auth)
+            print("Spotify client initialized successfully.")
+        except Exception as e:
+            print(f"Warning: Failed to initialize Spotify client ({e}). Local playback available.")
+            self.sp = None
 
     def _init_rfid_map(self):
         rfid_map = {}
@@ -105,6 +111,10 @@ class SpotifyController:
 
     def play_uri(self, uri: str):
         """Play a Spotify URI directly (called by PlaybackRouter)."""
+        if not self.sp:
+            print(f"[Spotify] Cannot play {uri}: Spotify credentials not configured. Configure via setup.py.")
+            return
+
         spotify_args = {}
         if uri.startswith("spotify:track:"):
             spotify_args["uris"] = [uri]
@@ -127,6 +137,8 @@ class SpotifyController:
             print(f"[Spotify] Failed to start playback: {e}")
 
     def pause(self):
+        if not self.sp:
+            return
         try:
             self.sp.pause_playback()
         except Exception as e:
@@ -134,6 +146,8 @@ class SpotifyController:
         self._store_playback()
 
     def _store_playback(self):
+        if not self.sp:
+            return
         try:
             playback = self.sp.current_playback()
             if not playback:
@@ -309,66 +323,103 @@ class RecordPlayer:
                 self.router.play(rfid_id)
 
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
+def get_lan_ips() -> list[str]:
+    """Detect LAN IP addresses for display."""
+    import socket
+    ips = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.append(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+    return ips
+
 
 def main():
-    print("Starting Record Player")
+    print("=== Starting RFID Record Player ===")
 
-    # --- Bluetooth ---
-    bt = BluetoothManager()
-    bt.power_on()
-    print("Bluetooth adapter powered on")
-
-    paired = bt.get_paired_devices()
-    for device in paired:
-        if device.get("trusted") and not device.get("connected"):
-            print(f"Reconnecting trusted device: {device['name']} ({device['mac']})")
-            if bt.connect(device["mac"]):
-                bt.set_as_default_sink(device["mac"])
-                print(f"Connected to {device['name']}")
-                break
-
-    # --- Playback backends ---
+    # 1. Playback controllers (local & Spotify)
     spotify = SpotifyController()
     local = LocalMediaPlayer()
     router = PlaybackRouter(spotify=spotify, local=local)
 
-    # --- Hardware ---
-    motor = StepperMotor()
-    rfid = SimpleMFRC522()
-    hall_sensor = DigitalInputDevice(HALL_SENSOR_PIN, pull_up=True, pin_factory=LGPIOFactory())
+    # 2. Bluetooth manager
+    bt = BluetoothManager()
 
-    player = RecordPlayer(
-        router=router,
-        motor=motor,
-        rfid=rfid,
-        hall_sensor=hall_sensor,
-    )
-
-    # --- Web server ---
+    # 3. Start Web Management Server IMMEDIATELY (port 8080)
     web_server.init(
         bluetooth_manager=bt,
         spotify_controller=spotify,
         local_media_player=local,
         playback_router=router,
-        record_player=player,
+        record_player=None,
     )
     web_server.run_server(host="0.0.0.0", port=8080)
-    print("Web interface running on http://record-player.local:8080")
 
-    # --- Main loop ---
+    lan_ips = get_lan_ips()
+    print("--------------------------------------------------")
+    print("✓ Web management interface is LIVE:")
+    print("  http://raspberrypi.local:8080")
+    for ip in lan_ips:
+        print(f"  http://{ip}:8080")
+    print("--------------------------------------------------")
+
+    # 4. Bluetooth auto-reconnect in background thread (non-blocking)
+    def bt_startup():
+        try:
+            bt.power_on()
+            print("[Bluetooth] Adapter powered on")
+            paired = bt.get_paired_devices()
+            for device in paired:
+                if device.get("trusted") and not device.get("connected"):
+                    print(f"[Bluetooth] Reconnecting: {device['name']} ({device['mac']})")
+                    if bt.connect(device["mac"]):
+                        bt.set_as_default_sink(device["mac"])
+                        print(f"[Bluetooth] Connected to {device['name']}")
+                        break
+        except Exception as e:
+            print(f"[Bluetooth] Warning during startup: {e}")
+
+    threading.Thread(target=bt_startup, daemon=True, name="bt-init").start()
+
+    # 5. Initialize hardware (Stepper, RFID, Hall Effect)
+    motor = None
+    player = None
+    try:
+        motor = StepperMotor()
+        rfid = SimpleMFRC522()
+        hall_sensor = DigitalInputDevice(HALL_SENSOR_PIN, pull_up=True, pin_factory=LGPIOFactory())
+
+        player = RecordPlayer(
+            router=router,
+            motor=motor,
+            rfid=rfid,
+            hall_sensor=hall_sensor,
+        )
+        web_server._record_player = player
+        print("✓ Hardware components initialized successfully")
+    except Exception as e:
+        print(f"Warning: Hardware (GPIO/RFID/Hall) initialization failed: {e}")
+        print("Record player hardware loop disabled, but web server remains fully operational.")
+
+    # 6. Main loop
     try:
         while True:
-            player.update()
+            if player:
+                player.update()
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("Shutting down...")
     finally:
         router.stop_all()
-        motor.stop()
-        GPIO.cleanup()
+        if motor:
+            motor.stop()
+        try:
+            GPIO.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

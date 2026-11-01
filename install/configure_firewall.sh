@@ -28,7 +28,7 @@ case "$MODE" in
         sudo ufw allow 5353/udp comment 'mDNS hostname resolution'
 
         # Rate-limited SSH & Web UI allowed exclusively from RFC 1918 private subnets
-        SUBNETS=("192.168.0.0/16" "10.0.0.0/8" "172.16.0.0/12")
+        SUBNETS=("192.168.0.0/16" "10.0.0.0/8" "172.16.0.0/12" "169.254.0.0/16")
         for subnet in "${SUBNETS[@]}"; do
             echo "Allowing access from $subnet..."
             sudo ufw allow from "$subnet" to any port 22 proto tcp comment "SSH from $subnet"

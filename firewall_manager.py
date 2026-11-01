@@ -30,7 +30,7 @@ import subprocess
 from typing import Dict, List, Tuple
 
 
-PRIVATE_SUBNETS = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+PRIVATE_SUBNETS = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "169.254.0.0/16"]
 
 
 def is_ufw_installed() -> bool:

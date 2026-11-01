@@ -477,7 +477,7 @@ def playback_resume():
             _playback_router.resume()
         elif _local_media_player and _local_media_player.get_status().get("paused"):
             _local_media_player.resume()
-        elif _spotify_controller:
+        elif _spotify_controller and _spotify_controller.sp:
             _spotify_controller.sp.start_playback()
         return jsonify({"success": True})
     except Exception as e:
@@ -505,7 +505,7 @@ def playback_current():
             })
 
     # Fall back to Spotify
-    if not _spotify_controller:
+    if not _spotify_controller or not _spotify_controller.sp:
         return jsonify({"playing": False})
     try:
         playback = _spotify_controller.sp.current_playback()
