@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RFID Record Player</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f0f; color: #e8e8e8; margin: 0; min-height: 100vh;
+    }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 18px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 7px 14px; border-radius: 7px; font-size: 13px;
+      font-weight: 500; cursor: pointer; border: none; transition: all .15s;
+    }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-green  { background: #1db954; color: #000; }
+    .btn-green:hover:not(:disabled) { background: #1ed760; }
+    .btn-blue   { background: #2d7fd3; color: #fff; }
+    .btn-blue:hover:not(:disabled) { background: #3a8fe0; }
+    .btn-muted  { background: #242424; color: #e8e8e8; border: 1px solid #333; }
+    .btn-muted:hover:not(:disabled) { background: #2e2e2e; }
+    .btn-red    { background: #c0392b22; color: #e74c3c; border: 1px solid #c0392b44; }
+    .btn-red:hover:not(:disabled) { background: #c0392b44; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .tag { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; }
+    .tag-green  { background: #1db95422; color: #1db954; border: 1px solid #1db95444; }
+    .tag-red    { background: #c0392b22; color: #e74c3c; border: 1px solid #c0392b44; }
+    .tag-blue   { background: #3498db22; color: #74b9ff; border: 1px solid #3498db44; }
+    .tag-orange { background: #e67e2222; color: #f39c12; border: 1px solid #e67e2244; }
+    .tag-gray   { background: #222; color: #888; border: 1px solid #333; }
+    .tab { cursor: pointer; padding: 6px 13px; border-radius: 7px; font-size: 12px; font-weight: 500; color: #666; transition: all .15s; white-space: nowrap; }
+    .tab.active { background: #1a1a1a; color: #e8e8e8; border: 1px solid #2a2a2a; }
+    input, select, textarea {
+      background: #111; border: 1px solid #2a2a2a; color: #e8e8e8;
+      border-radius: 7px; padding: 8px 11px; font-size: 13px; width: 100%; outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus { border-color: #1db954; }
+    .progress-bar { height: 3px; background: #222; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #1db954; border-radius: 2px; transition: width .5s; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333; border-top-color: #1db954; border-radius: 50%; animation: spin .7s linear infinite; }
+    .divider { border-top: 1px solid #222; margin: 8px 0; }
+    .notification {
+      position: fixed; bottom: 20px; right: 20px;
+      background: #1a1a1a; border: 1px solid #2a2a2a;
+      border-radius: 10px; padding: 11px 16px; font-size: 12px;
+      z-index: 9999; display: none; align-items: center; gap: 8px;
+      max-width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.6);
+    }
+    .notification.success { border-color: #1db95466; }
+    .notification.error   { border-color: #c0392b66; }
+    @keyframes vinyl-spin { to { transform: rotate(360deg); } }
+    .vinyl-spin { animation: vinyl-spin 2s linear infinite; display: inline-block; }
+    /* File picker row */
+    .file-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 7px; cursor: pointer;
+      transition: background .1s; border: 1px solid transparent;
+    }
+    .file-row:hover { background: #222; }
+    .file-row.selected { background: #1db95415; border-color: #1db95440; }
+    .file-row .ext-badge {
+      width: 36px; height: 24px; border-radius: 4px; background: #2a2a2a;
+      font-size: 9px; font-weight: 800; color: #888;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; text-transform: uppercase;
+    }
+    .drop-zone {
+      border: 2px dashed #333; border-radius: 9px; padding: 24px; text-align: center;
+      color: #555; font-size: 13px; cursor: pointer; transition: all .15s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: #1db954; color: #1db954; background: #1db95408; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div style="max-width:700px;margin:0 auto;padding:20px 14px;">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <span id="vinyl-icon" style="font-size:24px;">💿</span>
+    <div>
+      <div style="font-size:17px;font-weight:700;color:#fff;">RFID Record Player</div>
+      <div style="font-size:11px;color:#555;">Raspberry Pi · Management UI · :8080</div>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:7px;">
+      <div id="status-dot" style="width:8px;height:8px;border-radius:50%;background:#444;transition:background .3s;"></div>
+      <span id="status-text" style="font-size:11px;color:#666;">Connecting…</span>
+    </div>
+  </div>
+
+  <!-- Now Playing -->
+  <div id="now-playing" class="card" style="margin-bottom:14px;display:none;">
+    <div style="display:flex;gap:12px;align-items:center;">
+      <div id="np-art-wrap" style="width:50px;height:50px;border-radius:6px;overflow:hidden;flex-shrink:0;background:#222;display:flex;align-items:center;justify-content:center;font-size:22px;">🎵</div>
+      <div style="flex:1;min-width:0;">
+        <div id="np-track" style="font-size:14px;font-weight:700;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div id="np-sub" style="font-size:11px;color:#888;margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div class="progress-bar"><div id="np-progress" class="progress-fill" style="width:0%"></div></div>
+      </div>
+      <div style="display:flex;gap:5px;flex-shrink:0;">
+        <button class="btn btn-muted btn-sm" onclick="pausePlayback()">⏸</button>
+        <button class="btn btn-muted btn-sm" onclick="resumePlayback()">▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div style="display:flex;gap:3px;background:#111;border-radius:9px;padding:3px;margin-bottom:14px;overflow-x:auto;">
+    <div class="tab active"  onclick="showTab('bluetooth', this)">🔵 Bluetooth</div>
+    <div class="tab"         onclick="showTab('rfid',      this)">📻 RFID Tags</div>
+    <div class="tab"         onclick="showTab('local',     this)">🎵 Local Media</div>
+    <div class="tab"         onclick="showTab('security',  this)">🛡️ Security</div>
+    <div class="tab"         onclick="showTab('log',       this)">📋 Log</div>
+  </div>
+
+  <!-- ═══════════════════ TAB: BLUETOOTH ═══════════════════ -->
+  <div id="tab-bluetooth">
+
+    <div class="card" style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span style="font-size:13px;font-weight:700;">Bluetooth Speaker</span>
+        <button class="btn btn-green btn-sm" onclick="scanBluetooth()" id="scan-btn">🔍 Scan</button>
+      </div>
+      <div id="bt-connected-panel" style="display:none;">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#111;border-radius:8px;">
+          <span style="font-size:20px;">🔊</span>
+          <div style="flex:1;">
+            <div id="bt-name" style="font-size:13px;font-weight:600;"></div>
+            <div id="bt-mac"  style="font-size:10px;color:#555;"></div>
+          </div>
+          <span class="tag tag-green">Connected</span>
+          <button class="btn btn-red btn-sm" onclick="disconnectBt()">Disconnect</button>
+        </div>
+      </div>
+      <div id="bt-disconnected-panel">
+        <p style="font-size:12px;color:#555;margin:0;">No speaker connected. Scan or connect a paired device.</p>
+      </div>
+    </div>
+
+    <div class="card" id="scan-results-card" style="margin-bottom:12px;display:none;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Nearby Devices</div>
+      <div id="scan-results"><p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">Scanning…</p></div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Paired Devices</div>
+      <div id="paired-list"><p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">Loading…</p></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ TAB: RFID TAGS ═══════════════════ -->
+  <div id="tab-rfid" style="display:none;">
+
+    <!-- Add tag -->
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;">Add / Update RFID Tag</div>
+
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <div>
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">RFID ID</label>
+          <input type="text" id="add-rfid-id" placeholder="e.g. 849203847" />
+        </div>
+        <div>
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Label (optional)</label>
+          <input type="text" id="add-label" placeholder="e.g. Abbey Road" />
+        </div>
+        <div>
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Type</label>
+          <select id="add-type" onchange="toggleAddType()">
+            <option value="spotify">Spotify</option>
+            <option value="local">Local File</option>
+          </select>
+        </div>
+
+        <!-- Spotify fields -->
+        <div id="add-spotify-fields">
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Spotify URI</label>
+          <input type="text" id="add-uri" placeholder="spotify:album:..." />
+        </div>
+
+        <!-- Local fields -->
+        <div id="add-local-fields" style="display:none;">
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">File Path</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="add-path" placeholder="/home/pi/Music/song.mp3" />
+            <button class="btn btn-muted btn-sm" onclick="openFilePicker()" style="flex-shrink:0;white-space:nowrap;">📂 Browse</button>
+          </div>
+        </div>
+
+        <button class="btn btn-green" onclick="addRfidTag()" style="align-self:flex-start;">Add Tag</button>
+      </div>
+    </div>
+
+    <!-- Tag list -->
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Mapped Tags</div>
+      <div id="rfid-list"><p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">Loading…</p></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ TAB: LOCAL MEDIA ═══════════════════ -->
+  <div id="tab-local" style="display:none;">
+
+    <!-- Directory + scan -->
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Media Library</div>
+      <div style="display:flex;gap:7px;margin-bottom:10px;">
+        <input type="text" id="media-dir-input" placeholder="~/Music" />
+        <button class="btn btn-muted btn-sm" onclick="loadMediaFiles()" style="flex-shrink:0;white-space:nowrap;" id="media-scan-btn">🔄 Scan</button>
+      </div>
+      <div id="media-stats" style="font-size:11px;color:#555;margin-bottom:8px;"></div>
+      <div id="media-file-list" style="max-height:280px;overflow-y:auto;">
+        <p style="color:#444;font-size:12px;text-align:center;padding:14px 0;">Enter a directory and press Scan.</p>
+      </div>
+    </div>
+
+    <!-- Upload -->
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Upload File</div>
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div>⬆ Drop an audio file here or click to browse</div>
+        <div style="font-size:11px;margin-top:4px;">MP3, FLAC, OGG, WAV, AAC, M4A, OPUS …</div>
+      </div>
+      <input type="file" id="file-input" accept="audio/*" style="display:none" onchange="uploadFile(this)" />
+      <div id="upload-progress" style="margin-top:8px;display:none;">
+        <div style="font-size:12px;color:#888;margin-bottom:5px;" id="upload-label">Uploading…</div>
+        <div class="progress-bar"><div id="upload-fill" class="progress-fill" style="width:0%;transition:width .3s;"></div></div>
+      </div>
+    </div>
+
+    <!-- Quick assign panel (shown when a file is selected from list) -->
+    <div class="card" id="quick-assign-card" style="display:none;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Assign to RFID Tag</div>
+      <div style="font-size:12px;color:#888;margin-bottom:8px;">Selected: <span id="qa-file" style="color:#e8e8e8;font-weight:600;"></span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div>
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">RFID ID</label>
+          <input type="text" id="qa-rfid-id" placeholder="e.g. 849203847" />
+        </div>
+        <div>
+          <label style="font-size:11px;color:#888;display:block;margin-bottom:3px;">Label</label>
+          <input type="text" id="qa-label" placeholder="e.g. Abbey Road" />
+        </div>
+        <div style="display:flex;gap:7px;">
+          <button class="btn btn-green btn-sm" onclick="quickAssign()">✓ Assign</button>
+          <button class="btn btn-muted btn-sm" onclick="previewFile()">▶ Preview</button>
+          <button class="btn btn-muted btn-sm" onclick="closeQuickAssign()">✕ Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Now Playing (local) -->
+    <div class="card" id="local-now-playing" style="display:none;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Now Playing (Local)</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:24px;">🎵</span>
+        <div style="flex:1;min-width:0;">
+          <div id="local-filename" style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          <div id="local-time" style="font-size:11px;color:#888;margin:3px 0 7px;"></div>
+          <div class="progress-bar"><div id="local-progress" class="progress-fill" style="width:0%"></div></div>
+        </div>
+        <div style="display:flex;gap:5px;flex-shrink:0;">
+          <button class="btn btn-muted btn-sm" onclick="localPause()">⏸</button>
+          <button class="btn btn-muted btn-sm" onclick="localResume()">▶</button>
+          <button class="btn btn-muted btn-sm" onclick="localStop()">■</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ TAB: SECURITY & FIREWALL ═══════════════════ -->
+  <div id="tab-security" style="display:none;">
+
+    <!-- Firewall Hardening -->
+    <div class="card" style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span style="font-size:13px;font-weight:700;">UFW Linux Firewall</span>
+        <span id="fw-badge" class="tag tag-gray">Checking…</span>
+      </div>
+
+      <div style="font-size:12px;color:#888;margin-bottom:12px;" id="fw-summary">
+        Firewall status is being loaded…
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <button class="btn btn-green btn-sm" onclick="setFirewallPreset('strict')" id="fw-strict-btn">
+          🛡️ Strict (Private LAN Only)
+        </button>
+        <button class="btn btn-blue btn-sm" onclick="setFirewallPreset('standard')" id="fw-standard-btn">
+          🌐 Standard (LAN Open)
+        </button>
+        <button class="btn btn-red btn-sm" onclick="setFirewallPreset('disable')" id="fw-disable-btn">
+          ⚠️ Disable Firewall
+        </button>
+        <button class="btn btn-muted btn-sm" onclick="loadSecurityStatus()">
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div style="background:#111;border-radius:8px;padding:10px;border:1px solid #222;">
+        <div style="font-size:11px;font-weight:700;color:#aaa;margin-bottom:6px;">Active Rules</div>
+        <div id="fw-rules-list" style="font-family:monospace;font-size:11px;color:#777;max-height:160px;overflow-y:auto;line-height:1.6;">
+          Loading rules…
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Security & Policies -->
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;">File Upload Security Protections</div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111;border-radius:7px;border:1px solid #222;">
+          <span style="font-size:16px;">🔍</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;">Magic Byte Audio Header Verification</div>
+            <div style="font-size:10px;color:#555;">Validates file headers for MP3, FLAC, OGG, WAV, M4A, etc. Blocks spoofed extension attacks.</div>
+          </div>
+          <span class="tag tag-green">Enforced</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111;border-radius:7px;border:1px solid #222;">
+          <span style="font-size:16px;">🚫</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;">Executable & Script Signature Blocklist</div>
+            <div style="font-size:10px;color:#555;">Explicitly rejects ELF binaries, Windows PE/MZ executables, shell scripts (#!), PHP, HTML payloads.</div>
+          </div>
+          <span class="tag tag-green">Enforced</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111;border-radius:7px;border:1px solid #222;">
+          <span style="font-size:16px;">📁</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;">Path Traversal Confinement</div>
+            <div style="font-size:10px;color:#555;">Uploaded files and directory listings are strictly confined inside the user's music directory.</div>
+          </div>
+          <span class="tag tag-green">Enforced</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#111;border-radius:7px;border:1px solid #222;">
+          <span style="font-size:16px;">🛡️</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;">HTTP Defense-in-Depth Headers</div>
+            <div style="font-size:10px;color:#555;">CSP, X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN.</div>
+          </div>
+          <span class="tag tag-green">Active</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ TAB: LOG ═══════════════════ -->
+  <div id="tab-log" style="display:none;">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:700;">Activity Log</span>
+        <button class="btn btn-muted btn-sm" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="log-output" style="font-family:monospace;font-size:11px;color:#666;max-height:360px;overflow-y:auto;line-height:1.8;"></div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- File Picker Modal -->
+<div id="file-picker-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center;">
+  <div class="card" style="width:90%;max-width:580px;max-height:80vh;display:flex;flex-direction:column;gap:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #222;margin-bottom:10px;">
+      <span style="font-size:14px;font-weight:700;">Choose a Local File</span>
+      <button class="btn btn-muted btn-sm" onclick="closeFilePicker()">✕ Close</button>
+    </div>
+    <div id="picker-file-list" style="flex:1;overflow-y:auto;max-height:50vh;">
+      <p style="color:#444;font-size:12px;text-align:center;padding:14px 0;">Loading files…</p>
+    </div>
+    <div style="padding-top:10px;border-top:1px solid #222;margin-top:10px;">
+      <button class="btn btn-green" onclick="confirmFilePick()" id="picker-confirm-btn" disabled>Select File</button>
+    </div>
+  </div>
+</div>
+
+<!-- Notification -->
+<div id="notification" class="notification"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let currentTab = 'bluetooth';
+let connectedMac = null;
+let allMediaFiles = [];
+let selectedFilePath = null;   // from file picker modal
+let quickAssignPath = null;    // from quick-assign panel
+let pickerSelectedPath = null;
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+function showTab(name, el) {
+  ['bluetooth','rfid','local','security','log'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentTab = name;
+  if (name === 'bluetooth') loadPairedDevices();
+  if (name === 'rfid') loadRfidTags();
+  if (name === 'local') { loadMediaDir(); fetchLocalStatus(); }
+  if (name === 'security') loadSecurityStatus();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtTime(s) {
+  if (!s) return '0:00';
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2,'0')}`;
+}
+function fmtSize(mb) {
+  return mb < 1 ? (mb * 1024).toFixed(0) + ' KB' : mb.toFixed(1) + ' MB';
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+function notify(msg, type = 'info') {
+  const el = document.getElementById('notification');
+  const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+  el.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
+  el.className = `notification ${type}`;
+  el.style.display = 'flex';
+  appendLog(`[${type.toUpperCase()}] ${msg}`);
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.display = 'none', 4000);
+}
+
+// ─── Log ─────────────────────────────────────────────────────────────────────
+function appendLog(msg) {
+  const el = document.getElementById('log-output');
+  const ts = new Date().toLocaleTimeString();
+  el.innerHTML += `<div><span style="color:#333;">[${ts}]</span> ${esc(msg)}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() { document.getElementById('log-output').innerHTML = ''; }
+
+// ─── Status polling ───────────────────────────────────────────────────────────
+async function fetchStatus() {
+  try {
+    const r = await fetch('/api/status'); const d = await r.json();
+    const spinning = d.spinning;
+    const vinyl = document.getElementById('vinyl-icon');
+    if (spinning) vinyl.className = 'vinyl-spin'; else vinyl.className = '';
+    document.getElementById('status-dot').style.background = spinning ? '#1db954' : '#444';
+    document.getElementById('status-text').textContent = spinning ? 'Playing' : 'Idle';
+    const bt = d.bluetooth || {};
+    const cp = document.getElementById('bt-connected-panel');
+    const dp = document.getElementById('bt-disconnected-panel');
+    if (bt.connected && bt.device) {
+      connectedMac = bt.device.mac;
+      document.getElementById('bt-name').textContent = bt.device.name;
+      document.getElementById('bt-mac').textContent  = bt.device.mac;
+      cp.style.display = ''; dp.style.display = 'none';
+    } else {
+      connectedMac = null; cp.style.display = 'none'; dp.style.display = '';
+    }
+  } catch(e) {
+    document.getElementById('status-dot').style.background = '#c0392b';
+    document.getElementById('status-text').textContent = 'Offline';
+  }
+}
+
+async function fetchPlayback() {
+  try {
+    const r = await fetch('/api/playback/current'); const d = await r.json();
+    const panel = document.getElementById('now-playing');
+    if ((d.playing || d.paused) && d.track_name) {
+      panel.style.display = '';
+      document.getElementById('np-track').textContent = d.track_name;
+      document.getElementById('np-sub').textContent =
+        d.source === 'local'
+          ? (d.path ? d.path.split('/').pop() : '')
+          : [d.artist_name, d.album_name].filter(Boolean).join(' · ');
+      const artWrap = document.getElementById('np-art-wrap');
+      if (d.album_art) artWrap.innerHTML = `<img src="${esc(d.album_art)}" style="width:100%;height:100%;object-fit:cover;">`;
+      else artWrap.innerHTML = d.source === 'local' ? '🎵' : '🎵';
+      const pct = d.duration_ms ? (d.progress_ms / d.duration_ms) * 100 : 0;
+      document.getElementById('np-progress').style.width = pct + '%';
+    } else {
+      panel.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function fetchLocalStatus() {
+  try {
+    const r = await fetch('/api/media/status'); const d = await r.json();
+    const panel = document.getElementById('local-now-playing');
+    if (d.playing || d.paused) {
+      panel.style.display = '';
+      document.getElementById('local-filename').textContent = d.filename || '–';
+      document.getElementById('local-time').textContent =
+        `${fmtTime(d.position_s)} / ${fmtTime(d.duration_s)}`;
+      const pct = d.duration_s ? (d.position_s / d.duration_s) * 100 : 0;
+      document.getElementById('local-progress').style.width = pct + '%';
+    } else {
+      panel.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function pausePlayback()  { await fetch('/api/playback/pause',  {method:'POST'}); }
+async function resumePlayback() { await fetch('/api/playback/resume', {method:'POST'}); }
+async function localPause()  { await fetch('/api/media/pause',  {method:'POST'}); fetchLocalStatus(); }
+async function localResume() { await fetch('/api/media/resume', {method:'POST'}); fetchLocalStatus(); }
+async function localStop()   { await fetch('/api/media/stop',   {method:'POST'}); fetchLocalStatus(); document.getElementById('local-now-playing').style.display = 'none'; }
+
+// ─── Bluetooth ────────────────────────────────────────────────────────────────
+async function scanBluetooth() {
+  const btn = document.getElementById('scan-btn');
+  btn.innerHTML = '<span class="spinner"></span> Scanning…';
+  btn.disabled = true;
+  const card = document.getElementById('scan-results-card');
+  document.getElementById('scan-results').innerHTML =
+    '<p style="color:#444;font-size:12px;text-align:center;padding:10px 0;"><span class="spinner"></span> Scanning 8 s…</p>';
+  card.style.display = '';
+  appendLog('Bluetooth scan started…');
+  try {
+    const r = await fetch('/api/bluetooth/scan', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:8})});
+    const d = await r.json();
+    renderScanResults(d.devices || []);
+    appendLog(`Scan complete: ${d.devices.length} device(s) found`);
+  } catch(e) { notify('Scan failed','error'); }
+  btn.innerHTML = '🔍 Scan'; btn.disabled = false;
+}
+
+function renderScanResults(devices) {
+  const el = document.getElementById('scan-results');
+  if (!devices.length) { el.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">No devices found.</p>'; return; }
+  el.innerHTML = devices.map(d => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e1e1e;">
+      <div>
+        <div style="font-size:12px;font-weight:600;">${esc(d.name||'Unknown')}</div>
+        <div style="font-size:10px;color:#555;">${esc(d.mac)}</div>
+      </div>
+      <button class="btn btn-green btn-sm" onclick="pairDevice('${esc(d.mac)}','${esc(d.name||d.mac)}')">Pair & Connect</button>
+    </div>`).join('');
+}
+
+async function pairDevice(mac, name) {
+  notify(`Pairing with ${name}…`);
+  try {
+    const r = await fetch('/api/bluetooth/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mac})});
+    const d = await r.json();
+    notify(d.connected ? `Connected to ${name}! 🎵` : `Could not connect to ${name}`, d.connected ? 'success' : 'error');
+    fetchStatus(); loadPairedDevices();
+  } catch(e) { notify('Pairing failed','error'); }
+}
+
+async function connectDevice(mac, name) {
+  try {
+    const r = await fetch('/api/bluetooth/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mac})});
+    const d = await r.json();
+    notify(d.success ? `Connected to ${name}` : `Could not connect`, d.success ? 'success' : 'error');
+    fetchStatus(); loadPairedDevices();
+  } catch(e) { notify('Failed','error'); }
+}
+
+async function disconnectBt() {
+  if (!connectedMac) return;
+  const r = await fetch('/api/bluetooth/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mac:connectedMac})});
+  const d = await r.json();
+  notify(d.success ? 'Disconnected' : 'Failed', d.success ? 'success' : 'error');
+  fetchStatus(); loadPairedDevices();
+}
+
+async function removeDevice(mac, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  const r = await fetch('/api/bluetooth/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mac})});
+  const d = await r.json();
+  notify(d.success ? `Removed ${name}` : 'Remove failed', d.success ? 'success' : 'error');
+  fetchStatus(); loadPairedDevices();
+}
+
+async function loadPairedDevices() {
+  try {
+    const r = await fetch('/api/bluetooth/paired'); const d = await r.json();
+    const el = document.getElementById('paired-list');
+    if (!d.devices.length) { el.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">No paired devices.</p>'; return; }
+    el.innerHTML = d.devices.map(dev => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e1e1e;">
+        <div>
+          <div style="font-size:12px;font-weight:600;">${esc(dev.name||dev.mac)}</div>
+          <div style="font-size:10px;color:#555;">${esc(dev.mac)}</div>
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;">
+          ${dev.connected
+            ? `<span class="tag tag-green">● Connected</span>
+               <button class="btn btn-red btn-sm" onclick="disconnectBt()">Disconnect</button>`
+            : `<span class="tag tag-gray">Disconnected</span>
+               <button class="btn btn-muted btn-sm" onclick="connectDevice('${esc(dev.mac)}','${esc(dev.name)}')">Connect</button>`}
+          <button class="btn btn-red btn-sm" onclick="removeDevice('${esc(dev.mac)}','${esc(dev.name)}')">✕</button>
+        </div>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+// ─── RFID Tags ────────────────────────────────────────────────────────────────
+function toggleAddType() {
+  const t = document.getElementById('add-type').value;
+  document.getElementById('add-spotify-fields').style.display = t === 'spotify' ? '' : 'none';
+  document.getElementById('add-local-fields').style.display   = t === 'local'   ? '' : 'none';
+}
+
+async function loadRfidTags() {
+  try {
+    const r = await fetch('/api/rfid'); const d = await r.json();
+    const el = document.getElementById('rfid-list');
+    const entries = Object.entries(d);
+    if (!entries.length) { el.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:10px 0;">No tags mapped yet.</p>'; return; }
+    el.innerHTML = entries.map(([id, entry]) => {
+      const t = entry.type || 'spotify';
+      const label = entry.label || (t === 'local' ? (entry.path||'').split('/').pop() : id);
+      const target = t === 'spotify' ? (entry.uri||'') : (entry.path||'');
+      const typeTag = t === 'spotify'
+        ? `<span class="tag tag-green">Spotify</span>`
+        : `<span class="tag tag-orange">Local</span>`;
+      const icon = t === 'spotify' ? '🎵' : '🎵';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1e1e1e;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:12px;font-weight:600;">${icon} ${esc(label)}</div>
+            <div style="font-size:10px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${esc(target)}</div>
+            <div style="font-size:10px;color:#444;">ID: ${esc(id)}</div>
+          </div>
+          <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;margin-left:10px;">
+            ${typeTag}
+            <button class="btn btn-red btn-sm" onclick="deleteRfid('${esc(id)}')">✕</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch(e) { document.getElementById('rfid-list').innerHTML = '<p style="color:#c0392b;font-size:12px;">Error loading tags.</p>'; }
+}
+
+async function addRfidTag() {
+  const rfid_id = document.getElementById('add-rfid-id').value.trim();
+  const label   = document.getElementById('add-label').value.trim();
+  const type    = document.getElementById('add-type').value;
+  const uri     = document.getElementById('add-uri').value.trim();
+  const path    = document.getElementById('add-path').value.trim();
+
+  if (!rfid_id) { notify('RFID ID is required','error'); return; }
+  const body = { rfid_id, type, label };
+  if (type === 'spotify') body.uri = uri;
+  else body.path = path;
+
+  try {
+    const r = await fetch('/api/rfid',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json();
+    if (d.success) {
+      notify('Tag saved!','success');
+      ['add-rfid-id','add-label','add-uri','add-path'].forEach(id => document.getElementById(id).value = '');
+      loadRfidTags();
+    } else { notify(d.error||'Failed','error'); }
+  } catch(e) { notify('Network error','error'); }
+}
+
+async function deleteRfid(id) {
+  if (!confirm(`Remove tag ${id}?`)) return;
+  const r = await fetch(`/api/rfid/${encodeURIComponent(id)}`,{method:'DELETE'});
+  const d = await r.json();
+  notify(d.success ? 'Tag removed' : d.error, d.success ? 'success' : 'error');
+  loadRfidTags();
+}
+
+// ─── Local Media ──────────────────────────────────────────────────────────────
+async function loadMediaDir() {
+  try {
+    const r = await fetch('/api/media/dir'); const d = await r.json();
+    if (!document.getElementById('media-dir-input').value)
+      document.getElementById('media-dir-input').value = d.dir;
+  } catch(e) {}
+}
+
+async function loadMediaFiles() {
+  const dir = document.getElementById('media-dir-input').value.trim();
+  const btn = document.getElementById('media-scan-btn');
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+  const listEl = document.getElementById('media-file-list');
+  listEl.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:14px 0;"><span class="spinner"></span> Scanning…</p>';
+  document.getElementById('media-stats').textContent = '';
+
+  try {
+    const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
+    const r = await fetch('/api/media/files' + params); const d = await r.json();
+    allMediaFiles = d.files || [];
+    document.getElementById('media-stats').textContent =
+      `${allMediaFiles.length} file(s) in ${d.directory}`;
+    renderMediaFiles(allMediaFiles);
+    appendLog(`Media scan: ${allMediaFiles.length} file(s) in ${d.directory}`);
+  } catch(e) {
+    listEl.innerHTML = '<p style="color:#c0392b;font-size:12px;text-align:center;padding:10px 0;">Error scanning directory.</p>';
+  }
+  btn.innerHTML = '🔄 Scan'; btn.disabled = false;
+}
+
+function renderMediaFiles(files) {
+  const el = document.getElementById('media-file-list');
+  if (!files.length) { el.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:14px 0;">No audio files found.</p>'; return; }
+  el.innerHTML = files.map(f => `
+    <div class="file-row" onclick="selectFileForAssign('${esc(f.path)}','${esc(f.filename)}')">
+      <div class="ext-badge">${esc(f.ext)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(f.filename)}</div>
+        <div style="font-size:10px;color:#555;">${esc(f.rel_path)}</div>
+      </div>
+      <div style="font-size:10px;color:#555;flex-shrink:0;">${fmtSize(f.size_mb)}</div>
+      <button class="btn btn-muted btn-sm" onclick="event.stopPropagation();previewLocalFile('${esc(f.path)}')">▶</button>
+    </div>`).join('');
+}
+
+function selectFileForAssign(path, filename) {
+  quickAssignPath = path;
+  document.getElementById('qa-file').textContent = filename;
+  document.getElementById('qa-label').value = filename.replace(/\.[^/.]+$/, '');
+  document.getElementById('quick-assign-card').style.display = '';
+  document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
+  event.currentTarget && event.currentTarget.classList.add('selected');
+}
+
+function closeQuickAssign() {
+  quickAssignPath = null;
+  document.getElementById('quick-assign-card').style.display = 'none';
+  document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
+}
+
+async function quickAssign() {
+  const rfid_id = document.getElementById('qa-rfid-id').value.trim();
+  const label   = document.getElementById('qa-label').value.trim();
+  if (!rfid_id) { notify('Enter an RFID ID','error'); return; }
+  if (!quickAssignPath) { notify('No file selected','error'); return; }
+  try {
+    const r = await fetch('/api/rfid',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rfid_id,type:'local',path:quickAssignPath,label})});
+    const d = await r.json();
+    if (d.success) {
+      notify(`Assigned "${label}" to tag ${rfid_id}!`,'success');
+      closeQuickAssign();
+      document.getElementById('qa-rfid-id').value = '';
+    } else { notify(d.error||'Failed','error'); }
+  } catch(e) { notify('Network error','error'); }
+}
+
+async function previewFile() {
+  if (!quickAssignPath) return;
+  previewLocalFile(quickAssignPath);
+}
+
+async function previewLocalFile(path) {
+  try {
+    await fetch('/api/media/play',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
+    notify('Playing: ' + path.split('/').pop(), 'success');
+    fetchLocalStatus();
+  } catch(e) { notify('Failed to play','error'); }
+}
+
+// ─── Upload ───────────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) doUpload(file);
+});
+
+function uploadFile(input) {
+  if (input.files[0]) doUpload(input.files[0]);
+}
+
+async function doUpload(file) {
+  const dir = document.getElementById('media-dir-input').value.trim();
+  const progressWrap = document.getElementById('upload-progress');
+  const label = document.getElementById('upload-label');
+  const fill  = document.getElementById('upload-fill');
+  progressWrap.style.display = '';
+  label.textContent = `Uploading ${file.name}…`;
+  fill.style.width = '0%';
+
+  const form = new FormData();
+  form.append('file', file);
+  if (dir) form.append('dir', dir);
+
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) fill.style.width = Math.round(e.loaded / e.total * 100) + '%';
+    });
+    await new Promise((resolve, reject) => {
+      xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+      xhr.onerror = reject;
+      xhr.open('POST', '/api/media/upload');
+      xhr.send(form);
+    });
+    fill.style.width = '100%';
+    label.textContent = `✓ ${file.name} uploaded`;
+    notify(`Uploaded ${file.name}`,'success');
+    setTimeout(() => { progressWrap.style.display = 'none'; }, 2000);
+    loadMediaFiles();
+  } catch(e) {
+    label.textContent = 'Upload failed';
+    notify('Upload failed','error');
+  }
+}
+
+// ─── File Picker Modal ────────────────────────────────────────────────────────
+function openFilePicker() {
+  pickerSelectedPath = null;
+  document.getElementById('picker-confirm-btn').disabled = true;
+  const modal = document.getElementById('file-picker-modal');
+  modal.style.display = 'flex';
+  renderPickerFiles(allMediaFiles);
+  if (!allMediaFiles.length) loadMediaFiles().then(() => renderPickerFiles(allMediaFiles));
+}
+
+function renderPickerFiles(files) {
+  const el = document.getElementById('picker-file-list');
+  if (!files.length) {
+    el.innerHTML = '<p style="color:#444;font-size:12px;text-align:center;padding:14px 0;">No files found. Go to Local Media tab and scan a directory first.</p>';
+    return;
+  }
+  el.innerHTML = files.map(f => `
+    <div class="file-row" onclick="pickFile('${esc(f.path)}', this)">
+      <div class="ext-badge">${esc(f.ext)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(f.filename)}</div>
+        <div style="font-size:10px;color:#555;">${esc(f.rel_path)}</div>
+      </div>
+      <div style="font-size:10px;color:#555;">${fmtSize(f.size_mb)}</div>
+    </div>`).join('');
+}
+
+function pickFile(path, rowEl) {
+  pickerSelectedPath = path;
+  document.querySelectorAll('#picker-file-list .file-row').forEach(r => r.classList.remove('selected'));
+  rowEl.classList.add('selected');
+  document.getElementById('picker-confirm-btn').disabled = false;
+}
+
+function confirmFilePick() {
+  if (!pickerSelectedPath) return;
+  document.getElementById('add-path').value = pickerSelectedPath;
+  closeFilePicker();
+}
+
+function closeFilePicker() {
+  document.getElementById('file-picker-modal').style.display = 'none';
+}
+
+// ─── Security & Firewall ───────────────────────────────────────────────────────
+async function loadSecurityStatus() {
+  const badge = document.getElementById('fw-badge');
+  const summary = document.getElementById('fw-summary');
+  const rulesList = document.getElementById('fw-rules-list');
+
+  try {
+    const res = await fetch('/api/security/status');
+    const data = await res.json();
+    const fw = data.firewall || {};
+
+    if (!fw.installed) {
+      badge.className = 'tag tag-gray';
+      badge.textContent = 'UFW Not Installed';
+      summary.innerHTML = 'UFW is not installed. Run <code style="color:#e8e8e8;">sudo apt install ufw</code> on the Pi.';
+      rulesList.textContent = 'No firewall service detected.';
+      return;
+    }
+
+    if (fw.active) {
+      const isStrict = fw.mode === 'strict';
+      badge.className = isStrict ? 'tag tag-green' : 'tag tag-blue';
+      badge.textContent = isStrict ? '● Active (Strict LAN)' : '● Active (Standard)';
+      summary.innerHTML = isStrict
+        ? '<strong>Strict Mode Active:</strong> Inbound SSH (22) and Web UI (8080) are strictly limited to RFC 1918 private subnets. All external internet access is blocked.'
+        : '<strong>Standard Mode Active:</strong> Rate-limited SSH and port 8080 are open on local network.';
+    } else {
+      badge.className = 'tag tag-red';
+      badge.textContent = '● Disabled';
+      summary.innerHTML = 'Firewall is currently <strong>disabled</strong>. Anyone on the network can access SSH and Web UI without firewall restrictions.';
+    }
+
+    if (fw.rules && fw.rules.length) {
+      rulesList.innerHTML = fw.rules.map(r => `<div>${esc(r)}</div>`).join('');
+    } else {
+      rulesList.textContent = fw.active ? 'No custom rules active.' : 'Firewall inactive.';
+    }
+  } catch (e) {
+    badge.className = 'tag tag-red';
+    badge.textContent = 'Error';
+    summary.textContent = 'Could not load firewall status.';
+  }
+}
+
+async function setFirewallPreset(preset) {
+  notify(`Applying ${preset} firewall preset…`, 'info');
+  try {
+    const res = await fetch('/api/security/firewall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      notify(`Firewall preset '${preset}' applied!`, 'success');
+      loadSecurityStatus();
+    } else {
+      notify(`Firewall configuration: ${data.message || 'Check sudo permissions on Pi'}`, 'error');
+    }
+  } catch (e) {
+    notify('Network error updating firewall', 'error');
+  }
+}
+
+document.getElementById('file-picker-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeFilePicker();
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+fetchStatus();
+fetchPlayback();
+loadPairedDevices();
+setInterval(fetchStatus, 3000);
+setInterval(fetchPlayback, 5000);
+setInterval(() => { if (currentTab === 'local') fetchLocalStatus(); }, 3000);
+</script>
+</body>
+</html>

@@ -5,3 +5,4 @@ spidev
 pyyaml
 python-dotenv
 rpi-lgpio
+flask

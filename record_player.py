@@ -1,5 +1,19 @@
+"""
+record_player.py
+Main entry point for the RFID Record Player.
+
+RFID map entry formats (rfid.json):
+  - Legacy bare string (Spotify URI):
+      "123456": "spotify:album:..."
+  - New object format:
+      "123456": {"type": "spotify", "uri": "spotify:album:..."}
+      "123456": {"type": "local",   "path": "/home/pi/Music/album.mp3"}
+"""
+from __future__ import annotations
+
 import json
 import os
+import sys
 import RPi.GPIO as GPIO
 import threading
 import time
@@ -11,43 +25,75 @@ from mfrc522 import SimpleMFRC522
 from spotipy.cache_handler import MemoryCacheHandler
 from spotipy.oauth2 import SpotifyOAuth
 
+from bluetooth_manager import BluetoothManager
+from local_media_player import LocalMediaPlayer
+import web_server
+
 HALL_SENSOR_PIN = 17
 STEPPER_PINS = [14, 15, 18, 23]
 RFID_FILE = "rfid.json"
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def parse_rfid_entry(raw) -> dict | None:
+    """
+    Normalise an rfid.json value to {"type": ..., ...}.
+
+    Accepts:
+      - dict  {"type": "spotify", "uri": "..."} or {"type": "local", "path": "..."}
+      - str   "spotify:..." → {"type": "spotify", "uri": "..."}
+      - None  → None
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.startswith("spotify:"):
+        return {"type": "spotify", "uri": raw}
+    return None
+
+
+# ---------------------------------------------------------------------------
+# SpotifyController
+# ---------------------------------------------------------------------------
+
 class SpotifyController:
     def __init__(self):
-        self.init_spotify_client()
-        self.init_rfid_map()
         self.playback_cache = {}
-    
-    def init_spotify_client(self):
+        self.rfid_map: dict = {}
+        self._init_spotify_client()
+        self._init_rfid_map()
+
+    def _init_spotify_client(self):
         load_dotenv()
 
         client_id = os.getenv("SPOTIFY_CLIENT_ID")
         client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
         refresh_token = os.getenv("SPOTIFY_REFRESH_TOKEN")
         redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
-        
+
         if not all([client_id, client_secret, refresh_token, redirect_uri]):
-            print("Error: spotify secrets are not set.")
+            print("Error: Spotify secrets are not set.")
             sys.exit(1)
 
         auth = SpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
-            redirect_uri=refresh_token,
-            scope='user-read-playback-state,user-modify-playback-state',
+            redirect_uri=redirect_uri,
+            scope="user-read-playback-state,user-modify-playback-state",
             open_browser=False,
             cache_handler=MemoryCacheHandler(),
         )
         auth.refresh_access_token(refresh_token)
         self.sp = spotipy.Spotify(auth_manager=auth)
-    
-    def init_rfid_map(self):
+
+    def _init_rfid_map(self):
         rfid_map = {}
         try:
-            with open(RFID_FILE, 'r') as file:
+            with open(RFID_FILE, "r") as file:
                 rfid_map = json.load(file)
             if not rfid_map:
                 print("Warning: RFID map is empty.")
@@ -57,62 +103,142 @@ class SpotifyController:
             print(f"Error decoding JSON: {e}")
         self.rfid_map = rfid_map
 
-    def play(self, rfid_id):
-        print(f"Starting playback")
-        uri = self.rfid_map.get(str(rfid_id))
-        if not uri:
-            print(f"No Spotify URI mapped to RFID {rfid_id}")
-            return
-
+    def play_uri(self, uri: str):
+        """Play a Spotify URI directly (called by PlaybackRouter)."""
         spotify_args = {}
         if uri.startswith("spotify:track:"):
             spotify_args["uris"] = [uri]
             if uri == self.playback_cache.get("track_uri"):
-                print("Track URI is same, resuming playback")
+                print("Track URI same, resuming")
                 spotify_args["position_ms"] = self.playback_cache.get("progress_ms")
         else:
             spotify_args["context_uri"] = uri
             if uri == self.playback_cache.get("context_uri"):
                 if uri.startswith("spotify:artist:"):
-                    print("Context URI is artist, unable to resume playback ")
+                    print("Context URI is artist, unable to resume playback")
                 else:
-                    print("Context URI is same, resuming playback")
-                    spotify_args["offset"] = { "uri": self.playback_cache.get("track_uri") }
+                    print("Context URI same, resuming")
+                    spotify_args["offset"] = {"uri": self.playback_cache.get("track_uri")}
                     spotify_args["position_ms"] = self.playback_cache.get("progress_ms")
-        print(f"Start playback args: {spotify_args}")
+        print(f"[Spotify] start_playback args: {spotify_args}")
         try:
             self.sp.start_playback(**spotify_args)
         except Exception as e:
-            print(f"Failed to start playback: {e}")
+            print(f"[Spotify] Failed to start playback: {e}")
 
     def pause(self):
         try:
             self.sp.pause_playback()
         except Exception as e:
-            print(f"Failed to pause playback: {e}")
-        self.store_playback()
-    
-    def store_playback(self):
-        playback = self.sp.current_playback()
-        context = playback.get("context") or {}
-        self.playback_cache = {
-            "type": context.get("type"),
-            "context_uri": context.get("uri"),
-            "progress_ms": playback.get("progress_ms") or 0,
-            "track_uri": playback.get("item", {}).get("uri"),
-        }
-        print(f"Stored playback: {self.playback_cache}")
+            print(f"[Spotify] Failed to pause: {e}")
+        self._store_playback()
+
+    def _store_playback(self):
+        try:
+            playback = self.sp.current_playback()
+            if not playback:
+                return
+            context = playback.get("context") or {}
+            self.playback_cache = {
+                "type": context.get("type"),
+                "context_uri": context.get("uri"),
+                "progress_ms": playback.get("progress_ms") or 0,
+                "track_uri": playback.get("item", {}).get("uri"),
+            }
+            print(f"[Spotify] Stored playback: {self.playback_cache}")
+        except Exception as e:
+            print(f"[Spotify] Failed to store playback: {e}")
+
+
+# ---------------------------------------------------------------------------
+# PlaybackRouter – routes to Spotify or local player based on entry type
+# ---------------------------------------------------------------------------
+
+class PlaybackRouter:
+    """
+    Single point of control for all playback.
+    Reads the rfid_map (shared with web_server), resolves whether each RFID
+    tag maps to Spotify or a local file, and delegates accordingly.
+    """
+
+    def __init__(self, spotify: SpotifyController, local: LocalMediaPlayer):
+        self.spotify = spotify
+        self.local = local
+        # Shared map reference — updated live by web_server writes
+        self.rfid_map: dict = spotify.rfid_map
+
+        self._last_type: str | None = None  # "spotify" | "local"
+
+    def play(self, rfid_id: str | int):
+        rfid_id = str(rfid_id)
+        raw = self.rfid_map.get(rfid_id)
+        entry = parse_rfid_entry(raw)
+
+        if not entry:
+            print(f"[Router] No mapping for RFID {rfid_id}")
+            return
+
+        entry_type = entry.get("type")
+        print(f"[Router] RFID {rfid_id} → {entry_type}")
+
+        if entry_type == "spotify":
+            # Stop local player if it was active
+            self.local.stop()
+            self._last_type = "spotify"
+            self.spotify.play_uri(entry["uri"])
+
+        elif entry_type == "local":
+            # Pause Spotify if it was playing
+            try:
+                self.spotify.sp.pause_playback()
+            except Exception:
+                pass
+            self._last_type = "local"
+            self.local.play(entry["path"])
+
+        else:
+            print(f"[Router] Unknown entry type: {entry_type}")
+
+    def pause(self):
+        """Pause whichever source is currently active."""
+        if self._last_type == "local":
+            self.local.pause()
+        else:
+            self.spotify.pause()
+
+    def resume(self):
+        """Resume whichever source was previously active."""
+        if self._last_type == "local":
+            self.local.resume()
+        else:
+            try:
+                self.spotify.sp.start_playback()
+            except Exception:
+                pass
+
+    def stop_all(self):
+        """Hard stop — called on shutdown."""
+        self.local.stop()
+        try:
+            self.spotify.sp.pause_playback()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# StepperMotor
+# ---------------------------------------------------------------------------
 
 class StepperMotor:
     STEP_SEQUENCE = [
-        [1,0,0,1],
-        [1,0,0,0],
-        [1,1,0,0],
-        [0,1,0,0],
-        [0,1,1,0],
-        [0,0,1,0],
-        [0,0,1,1],
-        [0,0,0,1],
+        [1, 0, 0, 1],
+        [1, 0, 0, 0],
+        [1, 1, 0, 0],
+        [0, 1, 0, 0],
+        [0, 1, 1, 0],
+        [0, 0, 1, 0],
+        [0, 0, 1, 1],
+        [0, 0, 0, 1],
     ]
     STEP_DELAY = 0.002
 
@@ -146,9 +272,13 @@ class StepperMotor:
             pin.off()
 
 
+# ---------------------------------------------------------------------------
+# RecordPlayer
+# ---------------------------------------------------------------------------
+
 class RecordPlayer:
-    def __init__(self, spotify, motor, rfid, hall_sensor):
-        self.spotify = spotify
+    def __init__(self, router: PlaybackRouter, motor: StepperMotor, rfid, hall_sensor):
+        self.router = router
         self.motor = motor
         self.rfid = rfid
         self.hall_sensor = hall_sensor
@@ -169,29 +299,66 @@ class RecordPlayer:
             self.spinning = False
             self.current_rfid = None
             self.motor.stop()
-            self.spotify.pause()
+            self.router.pause()
 
         if self.spinning:
             rfid_id = self.rfid.read_id_no_block()
             if rfid_id and rfid_id != self.current_rfid:
                 print(f"RFID changed: {rfid_id}")
                 self.current_rfid = rfid_id
-                self.spotify.play(rfid_id)
+                self.router.play(rfid_id)
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
 
 def main():
     print("Starting Record Player")
+
+    # --- Bluetooth ---
+    bt = BluetoothManager()
+    bt.power_on()
+    print("Bluetooth adapter powered on")
+
+    paired = bt.get_paired_devices()
+    for device in paired:
+        if device.get("trusted") and not device.get("connected"):
+            print(f"Reconnecting trusted device: {device['name']} ({device['mac']})")
+            if bt.connect(device["mac"]):
+                bt.set_as_default_sink(device["mac"])
+                print(f"Connected to {device['name']}")
+                break
+
+    # --- Playback backends ---
     spotify = SpotifyController()
+    local = LocalMediaPlayer()
+    router = PlaybackRouter(spotify=spotify, local=local)
+
+    # --- Hardware ---
     motor = StepperMotor()
     rfid = SimpleMFRC522()
     hall_sensor = DigitalInputDevice(HALL_SENSOR_PIN, pull_up=True, pin_factory=LGPIOFactory())
 
     player = RecordPlayer(
-        spotify=spotify,
+        router=router,
         motor=motor,
         rfid=rfid,
         hall_sensor=hall_sensor,
     )
 
+    # --- Web server ---
+    web_server.init(
+        bluetooth_manager=bt,
+        spotify_controller=spotify,
+        local_media_player=local,
+        playback_router=router,
+        record_player=player,
+    )
+    web_server.run_server(host="0.0.0.0", port=8080)
+    print("Web interface running on http://record-player.local:8080")
+
+    # --- Main loop ---
     try:
         while True:
             player.update()
@@ -199,8 +366,10 @@ def main():
     except KeyboardInterrupt:
         print("Shutting down...")
     finally:
+        router.stop_all()
         motor.stop()
         GPIO.cleanup()
+
 
 if __name__ == "__main__":
     main()

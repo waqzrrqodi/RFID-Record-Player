@@ -3,7 +3,18 @@
 <img src="./docs/images/record_player.png" />
 
 A modern record player that repurposes a record player coaster as an interface for controlling Spotify playback via RFID and a Raspberry Pi, combining the physical experience of vinyl with digital playback.
-Features RFID detection of tagged records for Spotify content, a stepper motor–driven spinning platter, and tone arm control to start and stop playback.
+Features RFID detection of tagged records for Spotify content, a stepper motor–driven spinning platter, tone arm control to start/stop playback, **Bluetooth speaker support**, and a **lightweight web management interface** accessible from any device on the same network.
+
+## Features
+
+- 💿 **RFID-triggered Spotify & Local Media playback** — scan a tagged record to play Spotify URIs or local audio files (.mp3, .flac, .wav, .ogg, .m4a, etc.)
+- 📁 **Local Audio File Support** — play local files headlessly using `mpv` without requiring a Spotify subscription or internet connection
+- 🔊 **Bluetooth speaker** — pairs and connects to any A2DP Bluetooth speaker; auto-reconnects on boot
+- 🌐 **Web management UI** — accessible at `http://raspberrypi.local:8080` without a display, with drag-and-drop file upload, file browser, and tag management
+- 🖥 **Interactive TUI setup** — command-line interface for Spotify credentials, tag scanning, local file mapping, tag inspection, and firewall hardening
+- 🛡️ **Upload Security Checks** — magic byte audio header validation, script/executable blocklist, double-extension detection, and directory traversal confinement
+- 🧱 **Firewall Hardening (UFW)** — presets for Strict LAN-only access (private subnets only) or Standard mode with rate-limited SSH
+- 🔄 **Auto-start on boot** — systemd service starts everything headlessly
 
 ## Components
 
@@ -99,14 +110,78 @@ The stepper motor may become hot after long periods of use.
     - Paste a Spotify URI for a track, album, playlist, or artist 
         - URIs follow the format `spotify:{track|album|artist|playlist}:...`
         - To copy a Spotify URI, use the desktop app, click the three dots on a song/album/artist, hover over "Share," then hold Alt (Windows) or Option (Mac) and select "Copy Spotify URI"
-6. Start the Record Player 
-    Once the installation is complete, run the record player script to start playing music:
+    - You can also add/remove tags later via the **web interface** (see below)
+6. Pair a Bluetooth speaker
+    - The Pi's Bluetooth adapter is powered on automatically at startup
+    - Open the web interface at `http://raspberrypi.local:8080`
+    - Go to the **Bluetooth** tab, click **Scan**, and select your speaker
+    - Once paired, the speaker will auto-reconnect on every boot
+7. Start the Record Player
+    The systemd service installed by `install.sh` will auto-start on every boot. To start it manually:
     ```bash
-    source venv/bin/activate
-    python3 record_player.py
+    sudo systemctl start record-player
+    ```
+    To follow the logs:
+    ```bash
+    journalctl -u record-player -f
     ```
 
-After the installation, your spotify credentials will be stored in a .env file and the RFID ID mapping will be in a rfid.json file in the root of the repository.
+After the installation, your Spotify credentials will be stored in a `.env` file and the RFID ID mapping in `rfid.json` in the root of the repository.
+
+## Setup & Tag Configuration (TUI)
+
+You can configure credentials and tags at any time using the interactive terminal setup:
+```bash
+source venv/bin/activate
+python3 install/setup.py
+```
+
+Options:
+1. **Setup Spotify credentials** — client ID, secret, and OAuth refresh token
+2. **Map RFID tag → Spotify URI** — scan physical tag, assign track/album/artist/playlist URI with optional label
+3. **Map RFID tag → Local media file** — scan physical tag, browse/paginate local audio files from `~/Music` or enter a file path, with custom label
+4. **Read / inspect RFID tags** — scan tag to verify its mapped target and label
+5. **List all mappings** — tabular summary of all configured tags
+6. **Firewall & Network Security** — enable Strict LAN-only mode, Standard mode, check rules, or disable UFW
+
+## Web Interface
+
+Once the record player is running, open **`http://raspberrypi.local:8080`** in any browser on the same network.
+
+| Tab | What you can do |
+|-----|----------------|
+| 🔵 **Bluetooth** | Scan for Bluetooth speakers, pair, connect, disconnect, and remove devices |
+| 📻 **RFID Tags** | Add, label, and delete RFID mappings for both Spotify URIs and local files; includes file picker browser |
+| 🎵 **Local Media** | Browse files in `~/Music`, drag-and-drop file upload with security checks, preview playback, and 1-click assign to an RFID tag |
+| 🛡️ **Security** | Check upload validation policies, view UFW status, and toggle firewall presets (Strict LAN-only / Standard) |
+| 📋 **Log** | Live activity log from the record player hardware and playback events |
+
+## Security & Firewall Configuration
+
+### Upload File Security
+Every uploaded media file undergoes strict validation before being stored on disk:
+- **Magic Byte Inspection**: Audio headers are inspected to verify legitimate MP3 (ID3/MPEG sync), FLAC (`fLaC`), WAV (`RIFF....WAVE`), OGG/Opus (`OggS`), and M4A/AAC (`ftyp`/ADTS) files.
+- **Dangerous Signature Blocklist**: Instantly rejects Linux ELF binaries, Windows PE/MZ executables, shell scripts (`#!`), PHP, and HTML/script payloads even if renamed with an audio extension.
+- **Directory Traversal Protection**: Upload targets and file browsing requests are confined strictly within the configured music directory (`~/Music`).
+- **Filename Sanitization**: Rejects dangerous secondary extensions (e.g., `song.php.mp3`, `exploit.sh.wav`) and hidden files.
+- **HTTP Security Headers**: Enforces `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and `Referrer-Policy`.
+
+### Firewall Hardening (UFW)
+You can configure the firewall directly from the terminal or web interface:
+
+```bash
+# Strict mode: Restricts SSH (22) and Web UI (8080) exclusively to private LAN subnets (192.168.x.x, 10.x.x.x)
+sudo bash install/configure_firewall.sh strict
+
+# Standard mode: Allows Web UI on LAN with rate-limited SSH
+sudo bash install/configure_firewall.sh standard
+
+# Check status and active rules
+sudo bash install/configure_firewall.sh status
+
+# Disable firewall
+sudo bash install/configure_firewall.sh disable
+```
 
 ## Sponsoring
 
