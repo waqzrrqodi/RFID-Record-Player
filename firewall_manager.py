@@ -9,7 +9,7 @@ Presets:
    - Loopback: Allowed.
    - mDNS (5353/udp): Allowed for raspberrypi.local resolution.
    - SSH (22/tcp): Rate-limited and restricted to private subnets (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12).
-   - Web UI (8080/tcp): Restricted to private subnets (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12).
+   - Web UI (8082/tcp): Restricted to private subnets (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12).
 
 2. 'standard':
    - Inbound: Default Deny.
@@ -17,7 +17,7 @@ Presets:
    - Loopback: Allowed.
    - mDNS (5353/udp): Allowed.
    - SSH (22/tcp): Rate-limited.
-   - Web UI (8080/tcp): Allowed.
+   - Web UI (8082/tcp): Allowed.
 
 3. 'disabled':
    - Disables UFW.
@@ -135,15 +135,15 @@ def apply_firewall_preset(preset: str = "strict") -> Tuple[bool, str]:
         # Strict mode: Restrict SSH and Web UI exclusively to private RFC 1918 subnets
         for subnet in PRIVATE_SUBNETS:
             run_ufw_command(["allow", "from", subnet, "to", "any", "port", "22", "proto", "tcp", "comment", f"SSH from {subnet}"])
-            run_ufw_command(["allow", "from", subnet, "to", "any", "port", "8080", "proto", "tcp", "comment", f"Web UI from {subnet}"])
+            run_ufw_command(["allow", "from", subnet, "to", "any", "port", "8082", "proto", "tcp", "comment", f"Web UI from {subnet}"])
         # Add rate limiting for SSH
         run_ufw_command(["limit", "22/tcp", "comment", "Rate limit SSH"])
         mode_desc = "Strict LAN-only firewall enabled (SSH and Web UI limited to private subnets)"
 
     elif preset == "standard":
-        # Standard mode: Rate-limited SSH and port 8080 allowed
+        # Standard mode: Rate-limited SSH and port 8082 allowed
         run_ufw_command(["limit", "22/tcp", "comment", "Rate limit SSH"])
-        run_ufw_command(["allow", "8080/tcp", "comment", "Record Player Web UI"])
+        run_ufw_command(["allow", "8082/tcp", "comment", "Record Player Web UI"])
         mode_desc = "Standard firewall enabled (SSH rate-limited, Web UI allowed)"
 
     else:

@@ -571,7 +571,7 @@ def security_firewall():
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_server(host: str = "0.0.0.0", port: int = 8080, debug: bool = False):
+def run_server(host: str = "0.0.0.0", port: int = 8082, debug: bool = False):
     """Start Flask in a background daemon thread."""
     thread = threading.Thread(
         target=lambda: app.run(host=host, port=port, debug=debug, use_reloader=False),

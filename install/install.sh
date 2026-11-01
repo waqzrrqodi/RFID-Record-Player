@@ -78,7 +78,7 @@ else
     echo "Firewall setup skipped. You can configure it anytime via 'bash install/configure_firewall.sh strict' or the setup TUI."
 fi
 echo ""
-echo "Web interface will be available at:  http://raspberrypi.local:8080"
+echo "Web interface will be available at:  http://record-player.local:8082"
 
 read -p "Would you like to restart your Raspberry Pi now? [Y/N] " userInput
 userInput="${userInput^^}"

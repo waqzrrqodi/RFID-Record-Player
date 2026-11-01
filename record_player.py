@@ -356,14 +356,14 @@ def main():
         playback_router=router,
         record_player=None,
     )
-    web_server.run_server(host="0.0.0.0", port=8080)
+    web_server.run_server(host="0.0.0.0", port=8082)
 
     lan_ips = get_lan_ips()
     print("--------------------------------------------------")
     print("✓ Web management interface is LIVE:")
-    print("  http://raspberrypi.local:8080")
+    print("  http://record-player.local:8082")
     for ip in lan_ips:
-        print(f"  http://{ip}:8080")
+        print(f"  http://{ip}:8082")
     print("--------------------------------------------------")
 
     # 4. Bluetooth auto-reconnect in background thread (non-blocking)
